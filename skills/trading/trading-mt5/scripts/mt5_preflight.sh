@@ -1,32 +1,17 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-STATE="${HOME}/.hermes/trading-mt5-state"
-ENV_FILE="${STATE}/environment.env"
-
-if [[ -f "$ENV_FILE" ]]; then
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-else
-  echo "Preflight state not found: $ENV_FILE"
-  echo "Run the repository install.sh first."
-  exit 1
-fi
-
-printf 'OS: %s\n' "${TRADING_MT5_OS:-unknown}"
-printf 'Architecture: %s\n' "${TRADING_MT5_ARCH:-unknown}"
-printf 'Hermes: %s\n' "${TRADING_MT5_HERMES:-NOT FOUND}"
-printf 'Python: %s\n' "${TRADING_MT5_PYTHON:-NOT FOUND}"
-printf 'Wine: %s\n' "${TRADING_MT5_WINE:-NOT REQUIRED/NOT FOUND}"
-printf 'MT5 terminal: %s\n' "${TRADING_MT5_TERMINAL:-NOT FOUND}"
-printf 'MT5 detection: %s\n' "${TRADING_MT5_STATUS:-unknown}"
-
-if [[ "${TRADING_MT5_STATUS:-}" != "found" ]]; then
-  echo
-  echo "MT5 is not ready at the filesystem level. Do not enable autonomous trading."
-  exit 2
-fi
-
-echo
-echo "Filesystem preflight: PASS"
-echo "This does not prove broker login, market-data availability, or order execution."
+set -u
+echo "== MT5 preflight =="
+case "$(uname -s 2>/dev/null || true)" in
+  Linux*) echo "OS: Linux"; command -v wine >/dev/null 2>&1 && echo "Wine: found" || echo "Wine: not found";;
+  Darwin*) echo "OS: macOS"; command -v wine >/dev/null 2>&1 && echo "Wine: found" || echo "Wine: not found";;
+  MINGW*|MSYS*|CYGWIN*) echo "OS: Windows-compatible shell";;
+  *) echo "OS: unknown";;
+esac
+found=0
+for p in "$HOME/.mt5/drive_c/Program Files/MetaTrader 5/terminal64.exe" "$HOME/.wine/drive_c/Program Files/MetaTrader 5/terminal64.exe" "$HOME/.wine/drive_c/Program Files/MetaTrader 5/terminal.exe"; do
+  if [ -f "$p" ]; then echo "Terminal: found -> $p"; found=1; fi
+done
+[ "$found" -eq 1 ] || echo "Terminal: filesystem executable not found"
+echo "Filesystem detection is not broker authentication."
+echo "Filesystem detection is not market-data readiness."
+echo "Filesystem detection is not execution verification."

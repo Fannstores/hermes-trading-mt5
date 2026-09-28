@@ -1,108 +1,86 @@
-# Telegram Commands — Bahasa Indonesia
+# Telegram Commands
 
-Gunakan registry ini sebagai source of truth. Jangan menampilkan command yang tidak mempunyai implementation status yang sesuai.
+## Setup
 
-## Setup/control
-
-- `/sethome` — menetapkan Home Group.
-- `/status` — melihat status sistem/trading.
-- `/starttrading` — mengaktifkan autonomous entry.
-- `/stoptreding` — menghentikan autonomous entry baru.
-- `/stoptrading` — alias stop.
-- `/pause` — pause proses yang bisa dipause.
-- `/resume` — melanjutkan proses.
-- `/helptrading` — menampilkan bantuan command.
-
-## Strategy
-
-- `/strategies` — daftar strategy.
-- `/strateginew ...` — membuat hypothesis/metode baru.
-- `/strategy info NAME` — detail strategy.
-- `/strategy use NAME` — memilih strategy.
-- `/strategyimprove NAME ...` — membuat improvement version.
-- `/strategytest NAME` — menjalankan test.
-- `/strategycompare A B` — membandingkan strategy.
-- `/strategypromote NAME` — promote jika gate terpenuhi.
-- `/strategyretire NAME` — retire strategy.
-- `/strategyarchive NAME` — archive tanpa kehilangan history.
-- `/strategydelete NAME` — delete dengan confirmation/safety checks.
-- `/strategyrollback NAME VERSION` — rollback version.
+| Command | Function |
+|---|---|
+| `/start` | Show current status/menu; never reset valid setup |
+| `/sethome` | Configure/verify Home Group; idempotent |
+| `/setupstatus` | Show persistent setup state |
+| `/status` | Show Telegram + MT5 + trading status |
+| `/helptrading` | Show only implemented trading commands |
 
 ## Trading
 
-- `/analisis SYMBOL` — analisis lengkap.
-- `/signal SYMBOL` — signal strategy.
-- `/entry SYMBOL BUY|SELL LOT x SL 1 TP 2` — entry manual tervalidasi.
-- `/entry SYMBOL BUY|SELL AUTOLOT RISK 1 SL 1 TP 2` — entry dengan auto lot.
-- `/buy SYMBOL` — shortcut BUY.
-- `/sell SYMBOL` — shortcut SELL.
-- `/closeentry SYMBOL` — close posisi symbol; minta ticket jika ambigu.
-- `/close TICKET` — close ticket.
-- `/closeall` — close semua setelah confirmation.
+```text
+/analisis XAUUSD
+/entry XAUUSD
+/entry XAUUSD BUY LOT 0.05 SL 1 TP 2
+/entry XAUUSD BUY AUTOLOT RISK 1 SL 1 TP 2
+/positions
+/closeentry
+/closeall
+/starttrading
+/stoptreding
+/stoptrading
+```
 
-## Position management
+### Important routing rule
 
-- `/positions` — posisi aktif.
-- `/position TICKET` — detail posisi.
-- `/orders` — pending orders.
-- `/history` — history.
-- `/tradeinfo TICKET` — detail transaction.
-- `/setsltp SYMBOL SL 1 TP 2` — set SL/TP dari R.
-- `/setsl SYMBOL SL 1` — set SL.
-- `/settp SYMBOL TP 2` — set TP.
-- `/trailsl SYMBOL` — trailing stop.
-- `/breakeven SYMBOL` — break-even.
-- `/partialclose SYMBOL 50` — partial close 50%.
+Once setup state is `READY`, all authorized commands must bypass setup and enter their handler.
 
-## Risk/account/monitoring
+`/entry` must never require `/sethome` again merely because a new Telegram message arrived.
 
-- `/risk` — risk policy.
-- `/setrisk ...` — update risk policy.
-- `/maxlot VALUE` — max lot.
-- `/maxposition VALUE` — max positions.
-- `/maxdrawdown VALUE` — max DD.
-- `/riskcheck SYMBOL` — risk gate.
-- `/dailyresult` — daily result.
-- `/drawdown` — current DD.
-- `/balance` — balance.
-- `/equity` — equity.
-- `/margin` — margin.
-- `/report` — report.
-- `/pnl` — PnL.
-- `/performance` — performance.
-- `/health` — system health.
-- `/logs` — relevant logs.
-- `/alerts` — alerts.
-- `/mt5` — MT5 state.
-- `/broker` — broker information.
-- `/account` — account information.
+### `/entry XAUUSD`
 
-## Research/watchlist
+Analysis/proposal only.
 
-- `/research TOPIC` — web research.
-- `/news SYMBOL` — news.
-- `/calendar` — economic calendar.
-- `/sentiment SYMBOL` — sentiment summary.
-- `/watchlist` — watchlist.
-- `/addwatch SYMBOL` — add symbol.
-- `/delwatch SYMBOL` — remove symbol.
+### `/entry XAUUSD BUY LOT 0.05 SL 1 TP 2`
 
-## Evolution/automation
+Request flow:
 
-- `/backtest NAME` — backtest.
-- `/backtestresult NAME` — result.
-- `/forwardtest NAME` — forward/demo test.
-- `/experiment NAME` — experiment.
-- `/compare A B` — compare experiments.
-- `/evolution` — evolution state.
-- `/learn` — derive lesson from evidence.
-- `/lessons` — stored lessons.
-- `/goal` — goal state.
-- `/cron` — managed cron.
-- `/tasks` — tasks.
+```text
+parse
+→ validate
+→ permission
+→ strategy/risk
+→ preview/confirmation if required
+→ MT5
+→ read-back
+→ journal
+```
 
-### Help categories
+### `/closeentry`
 
-`/helptrading entry`, `/helptrading risk`, `/helptrading strategy`, `/helptrading analysis`, `/helptrading system`
+If multiple open positions exist, ask which position. Do not guess.
 
-Descriptions must remain short enough for Telegram but link to this detailed reference when needed.
+### `/closeall`
+
+Always require explicit confirmation before closing positions unless an emergency policy explicitly defines otherwise.
+
+## Setup error responses
+
+Do not use generic setup errors.
+
+Bad:
+
+```text
+Please run /sethome first.
+```
+
+when state is READY.
+
+Good:
+
+```text
+SETUP READY
+User authorization: PASS
+Home Group: PASS
+Command: /entry
+Router: BLOCKED
+Reason: MT5 is not connected
+```
+
+## v8 command registration
+
+The v8 package installs `hermes-trading-mt5-command-router` as a native Hermes plugin. This is required because SKILL.md installation alone exposes `/trading-mt5`, not arbitrary `/entry`-style commands. The plugin registers the commands through `ctx.register_command()` and routes them into the same gateway session. The installer enables gateway injection and prioritizes the commands in the Telegram menu.

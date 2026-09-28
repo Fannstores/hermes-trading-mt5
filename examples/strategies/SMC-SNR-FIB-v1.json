@@ -1,28 +1,8 @@
 {
   "id": "SMC-SNR-FIB",
+  "name": "SMC + SNR + Fibonacci",
   "version": "v1",
   "status": "HYPOTHESIS",
-  "symbols": ["XAUUSD"],
-  "timeframes": ["H1", "M15"],
-  "entry": [
-    "H1 directional bias from market structure",
-    "M15 confirmation using SMC/liquidity behavior",
-    "SNR zone alignment",
-    "Fibonacci retracement confluence"
-  ],
-  "exit": {
-    "sl": "strategy-defined 1R distance",
-    "tp": "2R example only; must be tested"
-  },
-  "risk": {
-    "one_r": "explicit strategy-defined distance; choose ATR, structure, or fixed only after research",
-    "max_risk_pct": null
-  },
-  "validation": {
-    "backtest": "required",
-    "out_of_sample": "required",
-    "forward_demo": "required",
-    "real_promotion": "not allowed from hypothesis alone"
-  },
-  "notes": "Example only. This manifest does not claim profitability."
+  "one_r_basis": "strategy-defined",
+  "notes": "Hypothesis only; requires backtest and out-of-sample validation."
 }

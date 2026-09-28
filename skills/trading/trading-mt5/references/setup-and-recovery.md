@@ -1,52 +1,58 @@
 # Setup and Recovery
 
-## Setup state machine
+## Setup order
 
 ```text
-PREFLIGHT -> DISCOVERY -> ASK -> WAIT -> APPLY -> VERIFY -> READY
+1. Inspect OS/runtime
+2. Inspect Telegram credentials
+3. Inspect persistent Telegram state
+4. Verify Home Group
+5. Verify MT5 filesystem/runtime
+6. Verify broker authentication
+7. Verify market data
+8. Verify execution capability
+9. Report exact status
 ```
 
-### PREFLIGHT
+These statuses are separate:
 
-Check:
-- Linux architecture and supported runtime.
-- Hermes version/capabilities.
-- MT5 terminal/bridge availability.
-- Python/runtime dependencies.
-- Telegram capability.
-- write access to state root.
-- existing configuration.
+```text
+filesystem_found
+terminal_ready
+broker_authenticated
+market_data_ready
+execution_verified
+```
 
-### DISCOVERY
+## Recovery
 
-Read existing state first. Never ask for values already known and verified.
+Never blindly repeat `/sethome`.
 
-### ASK/WAIT
+If user reports:
 
-Ask exactly one blocking question at a time. Examples:
-- Demo or Real?
-- Manual, Assisted, or Autonomous?
-- What is the broker/server and account login?
-- What defines 1R: ATR, structure, or fixed distance?
-- Is REAL autonomous execution explicitly allowed?
+> `/sethome` sudah berhasil tapi Hermes masih meminta `/sethome`
 
-Do not continue until answered.
+run this diagnostic:
 
-### APPLY
+```text
+persistent setup exists?
+state == READY?
+stored user id == current user id?
+stored home chat id == current chat id?
+role valid?
+bot identity same?
+```
 
-Apply the minimum change. Preserve existing state and unrelated cron.
+If all pass, repair command routing instead of setup.
 
-### VERIFY
+If persistence is missing, enter `REPAIR_REQUIRED`, explain what is missing, then rebuild the state once.
 
-Read back configuration and test the relevant component. For MT5 execution, verify order ticket/status/SL/TP from MT5.
+## Telegram bot behavior
 
-## Recovery rules
+The bot should acknowledge `/sethome` with a deterministic result and should read the persistent state on every process start.
 
-1. Capture exact error.
-2. Identify root cause.
-3. Apply only a safe/reversible fix.
-4. Re-run a changed check, not an identical blind retry.
-5. Verify.
-6. If blocked, ask user for the missing external action.
+Do not use conversation memory as the only source of Telegram setup state.
 
-Never say "berhasil" unless the verification evidence exists.
+## MT5 setup
+
+Do not assume MT5 is installed. Detect OS, Wine, terminal executable, account authentication, market data, and execution readiness separately. Never claim broker login is complete merely because a terminal executable exists.

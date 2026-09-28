@@ -1,0 +1,3 @@
+name: hermes-trading-mt5-command-router
+version: "1.0.0"
+description: Registers Hermes Trading MT5 Telegram slash commands and routes them into the trading-mt5 skill session.

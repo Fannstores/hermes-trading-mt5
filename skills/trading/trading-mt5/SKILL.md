@@ -1,120 +1,264 @@
 ---
 name: trading-mt5
-description: Hermes skill untuk MetaTrader 5: Telegram command control, technical/fundamental research, strategy development/evolution, risk management, verified execution, journaling, and managed cron supervision.
-version: 2.0.0
+description: Hermes skill untuk MetaTrader 5 dengan Telegram control plane, persistent setup state, command routing, research, strategy lifecycle, risk management, verified execution, journaling, and managed cron supervision.
+version: 2.1.0
 metadata:
   hermes:
     tags: [trading, mt5, forex, gold, telegram, strategy, backtest, research, risk, cron]
     category: trading
 ---
 
-# Trading MT5
+# Trading MT5 — Hermes Operating Skill
 
-Gunakan skill ini untuk operasi MT5, analisis, research, strategy development, execution, risk control, journaling, dan evolution.
+## 1. Non-negotiable rules
 
-## Hard rules
+- Default: `MODE=demo`, `TRADING_MODE=manual`, `PERMISSION=readonly`.
+- Never execute an order without permission, input validation, risk validation, and MT5 verification.
+- `SENT` is not `EXECUTED`.
+- Never claim success until MT5 read-back confirms the requested state.
+- Never expose secrets in Telegram, logs, Git, or reports.
+- Never overwrite an active strategy blindly.
+- Never modify unrelated cron jobs.
+- Never retry blindly after setup or execution failure.
+- If information is missing, ask one precise question and WAIT.
+- Telegram is a control plane; persistent state must live outside the chat session.
 
-1. Default `MODE=demo`, `TRADING_MODE=manual`, `PERMISSION=readonly`.
-2. `REAL_AUTONOMOUS_ENABLED` harus explicit `true` sebelum autonomous REAL execution.
-3. Tidak ada order tanpa permission + validation + risk checks.
-4. Tidak pernah menyatakan order sukses tanpa read-back/verifikasi MT5.
-5. Jangan meminta/mencetak password, API token, atau secret di Telegram/log.
-6. `/stoptreding` dan `/stoptrading` hanya memblokir autonomous NEW ENTRY. Jangan menutup posisi terbuka.
-7. `SL 1 TP 2` selalu berarti `1R:2R`; definisi 1R harus berasal dari strategy config.
-8. Jika data penting hilang, tanya user dan WAIT. Jangan menebak.
-9. Jika gagal, diagnose root cause; jangan blind retry.
-10. Jangan menyentuh cron yang tidak memiliki `MT5-EVO-MANAGED:v1`.
-11. Jangan overwrite active strategy. Perubahan menghasilkan version baru.
-12. `/helptrading` hanya boleh menampilkan command yang terdaftar di registry/implemented handler.
+## 2. Telegram setup is a state machine
 
-## Command dispatch
+Use exactly these states:
 
-Semua input Telegram dan autonomous trigger wajib melewati satu command/operation layer:
+```text
+UNCONFIGURED
+VERIFYING
+READY
+REPAIR_REQUIRED
+```
 
-`parser -> registry -> auth -> validation -> strategy -> risk -> MT5 adapter -> verification -> journal -> response`
+Persistent Telegram setup record must contain at minimum:
 
-Bot tidak boleh mempunyai jalur khusus yang melewati risk engine.
+```json
+{
+  "schema_version": 1,
+  "state": "READY",
+  "bot_id": "telegram-bot-id",
+  "owner_user_id": "123",
+  "home_chat_id": "-100123",
+  "home_chat_type": "supergroup",
+  "role": "owner",
+  "verified_at": "ISO-8601",
+  "updated_at": "ISO-8601"
+}
+```
 
-## Setup
+Do not use a transient LLM/session variable as the source of truth.
 
-Ikuti `references/setup-and-recovery.md` dan perlakukan hasil installer sebagai **preflight evidence**, bukan bukti broker-ready.
+### `/sethome`
 
-Urutan wajib:
+`/sethome` is idempotent.
 
-1. Deteksi OS dan architecture.
-2. Deteksi Hermes CLI dan runtime yang dibutuhkan.
-3. Linux/macOS: deteksi Wine terlebih dahulu; Windows native: deteksi MT5 native.
-4. Deteksi terminal MT5 (`terminal64.exe`/`terminal.exe`) pada lokasi/prefix yang ditemukan.
-5. Jika terminal tidak ditemukan, jelaskan dependency yang hilang dan jangan mengklaim MT5 siap.
-6. Jika terminal ditemukan, lanjutkan discovery broker/account/bridge/market-data.
-7. Bedakan status `filesystem_found`, `terminal_ready`, `broker_authenticated`, `market_data_ready`, dan `execution_verified`.
-8. Jika informasi konfigurasi penting belum tersedia, ASK ONE QUESTION lalu WAIT.
-9. Setelah APPLY, selalu VERIFY dengan read-back.
+When received:
 
-Script preflight tersedia di `scripts/mt5_preflight.sh`. Script ini hanya memeriksa environment/filesystem; login broker dan execution tetap harus diverifikasi oleh Hermes/MT5 adapter.
+1. Read Telegram runtime identity: `from.id`, `chat.id`, `chat.type`.
+2. Load persistent setup state.
+3. If no state exists, validate and create it.
+4. If state is `READY` and identity/chat match, return `ALREADY_READY` and do not restart setup.
+5. If the same owner is setting a different chat as home, explicitly show old/new chat IDs and require confirmation before changing.
+6. If unauthorized, reject without changing state.
+7. Persist atomically.
+8. Re-read the persisted state.
+9. Return a concise verification summary.
 
-## Telegram
+Successful response must make the state explicit:
 
-Home group dibuat dengan `/sethome`. Authorization memakai Telegram User ID + Home Group ID + role. Group membership bukan permission.
+```text
+TELEGRAM SETUP READY
 
-## Research
+User ID: <id>
+Home Chat ID: <id>
+Role: owner
+State: READY
 
-Untuk fundamental/news/economic context, gunakan browser/web bila tersedia. Catat source URL/name, publication time, market-data time, dan limitations. Jangan mengarang source atau data.
+You do not need to run /sethome again.
+```
 
-## Strategy development
+### `/setupstatus`
 
-`/strateginew` membuat hypothesis baru dari instruksi natural language. Contoh:
+Must read persistent state and report:
 
-`/strateginew Coba buat metode SMC + SNR + Fibonacci untuk XAUUSD. H1 bias, M15 entry. Research, backtest, OOS, demo dulu.`
+```text
+State
+User ID
+Home Chat ID
+Chat type
+Role
+Last verified time
+Bot identity
+```
 
-Treat the requested method as a hypothesis, not proof of profitability.
+If `READY`, it must not ask the user to run `/sethome`.
 
-Lifecycle:
+If state is missing but environment variables contain a Home Chat ID, reconcile them instead of blindly restarting setup.
 
-`IDEA -> HYPOTHESIS -> IMPLEMENTATION -> BACKTEST -> OUT-OF-SAMPLE -> DEMO -> CANDIDATE -> PROMOTED -> RETIRED`
+## 3. Command routing
 
-Setiap perubahan strategy menghasilkan version baru dan change log.
+After Telegram authorization succeeds:
 
-## Risk
+```text
+Telegram update
+→ identity extraction
+→ persistent setup lookup
+→ authorization
+→ command parser
+→ command handler
+→ validation
+→ risk/strategy policy
+→ MT5 adapter
+→ verification
+→ journal
+→ Telegram response
+```
 
-Minimal checks: risk/trade, lot, positions, daily loss, drawdown, spread, margin, stale data, session, duplicate order, broker errors, kill switch.
+**Setup middleware must not loop back into setup after `READY`.**
 
-Auto lot harus menggunakan balance/equity, risk %, SL distance, tick value/size, contract constraints, and margin requirements.
+Only these conditions may block routing:
 
-## SL/TP
+- unauthorized user;
+- unauthorized chat;
+- `REPAIR_REQUIRED`;
+- required runtime dependency unavailable;
+- malformed command;
+- risk/policy rejection.
 
-Untuk BUY:
+A malformed trading command should return command-specific help, not `/sethome`.
 
-`SL = entry - R_distance`
-`TP = entry + (TP_R * R_distance)`
+## 4. `/entry`
 
-Untuk SELL:
+Examples:
 
-`SL = entry + R_distance`
-`TP = entry - (TP_R * R_distance)`
+```text
+/entry XAUUSD
+```
 
-`R_distance` berasal dari strategy. Validasi broker stop-level/freeze-level sebelum modify.
+Meaning: analysis/proposal only.
 
-## Cron supervisor
+```text
+/entry XAUUSD BUY LOT 0.05 SL 1 TP 2
+```
 
-Name: `MT5-EVO-SUPERVISOR`
+Meaning: prepare a BUY request and pass it through validation/risk/execution policy.
 
-Marker: `MT5-EVO-MANAGED:v1`
+```text
+/entry XAUUSD BUY AUTOLOT RISK 1 SL 1 TP 2
+```
 
-Reconcile only managed cron. If objective changes, remove/update only the old managed job and create the new managed job. Verify result.
+Meaning: calculate lot from configured risk and validated SL distance.
 
-## Persistent state
+Never guess missing side, lot, risk, or SL/TP.
 
-Default state root: `~/.hermes/trading-mt5-state/`.
+`SL 1 TP 2` means 1R:2R. The strategy/risk configuration must define how 1R is calculated (ATR, structure, fixed distance, etc.).
 
-Use structured JSON/Markdown for setup, goals, experiments, lessons, strategies, trades, research, and cron metadata.
+## 5. Trading modes
 
-## Documentation
+```text
+MANUAL
+ASSISTED
+AUTONOMOUS
+```
 
-See:
-- `references/telegram-commands.md`
-- `references/setup-and-recovery.md`
-- `references/strategy-lifecycle.md`
-- `references/fundamental-research.md`
-- `references/cron-goal-reconciliation.md`
-- `references/troubleshooting.md`
+`/stoptreding` and `/stoptrading` stop autonomous NEW entries. They do not automatically close open positions.
+
+`/starttrading` re-enables autonomous NEW entries but does not force an entry.
+
+REAL + AUTONOMOUS requires explicit `REAL_AUTONOMOUS_ENABLED=true` plus all other risk/permission requirements.
+
+## 6. Risk
+
+Validate at least:
+
+- max risk/trade;
+- max lot;
+- max positions;
+- daily loss;
+- drawdown;
+- spread;
+- symbol;
+- session;
+- market data freshness;
+- broker constraints;
+- margin;
+- strategy permission.
+
+Auto lot must use actual account/broker metadata: balance/equity, tick value/size, contract size where applicable, lot min/max/step, SL distance, and margin.
+
+## 7. Execution verification
+
+Order lifecycle:
+
+```text
+REQUESTED
+→ VALIDATING
+→ APPROVED
+→ SENT
+→ ACKNOWLEDGED
+→ EXECUTED
+```
+
+Failure states:
+
+```text
+FAILED
+REJECTED
+TIMEOUT
+```
+
+Never collapse these into one generic success/failure state.
+
+## 8. Strategy lifecycle
+
+```text
+IDEA → HYPOTHESIS → IMPLEMENTATION → BACKTEST
+→ OUT-OF-SAMPLE → DEMO → CANDIDATE → PROMOTED → RETIRED
+```
+
+Commands:
+
+```text
+/strategienew
+/strategyimprove
+/strategytest
+/strategycompare
+/strategypromote
+/strategyretire
+/strategyarchive
+/strategydelete
+/strategyrollback
+```
+
+Delete requires confirmation and must preserve history/archive.
+
+## 9. Research
+
+For fundamental/news research use web/browser sources with source URL/title and timestamp. Never invent unavailable market or news data.
+
+## 10. Managed cron
+
+Managed cron marker:
+
+```text
+MT5-EVO-MANAGED:v1
+```
+
+Only manage the cron entry carrying that marker. Never delete or rewrite unrelated user cron jobs.
+
+## 11. Failure handling
+
+When a command fails:
+
+1. capture the exact failing stage;
+2. classify the failure;
+3. inspect state/dependency;
+4. apply the smallest safe fix;
+5. verify again;
+6. report the actual result.
+
+Do not ask the user to repeat successful setup steps unless verification proves the persistent state is missing or invalid.
